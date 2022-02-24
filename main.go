@@ -1,32 +1,73 @@
 package main
 
 import (
-	"encoding/json"
+	"bufio"
+	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/google/go-github/v42/github"
+	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/oauth2"
 )
 
-type Whois struct {
-	Ip      string
-	Region  string
-	City    string
-	Country string
+func getInput(phrase string) string {
+	fmt.Print(phrase)
+	reader := bufio.NewReader(os.Stdin)
+	// ReadString will block until the delimiter is entered
+	res, err := reader.ReadString('\n')
+	println()
+	if err != nil {
+		fmt.Println("An error occured while reading input. Please try again", err)
+		return ""
+	}
+	res = strings.TrimSuffix(res, "\n")
+	return res
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("Usage: " + os.Args[0] + " [IP ADDRESS]")
+	fmt.Print("GitHub Token: ")
+	byteToken, _ := terminal.ReadPassword(int(syscall.Stdin))
+	println()
+	usertoCheck := getInput("Username to check PRs: ")
+	repo := getInput("Repository to check PRs: ")
+	token := string(byteToken)
+
+	ctx := context.Background()
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token},
+	)
+	tc := oauth2.NewClient(ctx, ts)
+
+	client := github.NewClient(tc)
+
+	opts := github.PullRequestListOptions{
+		State:       "closed",
+		Head:        "",
+		Base:        "",
+		Sort:        "",
+		Direction:   "",
+		ListOptions: github.ListOptions{Page: 0, PerPage: 100},
+	}
+	openPrs, _, err := client.PullRequests.List(ctx, "scality", repo, &opts)
+	if err != nil {
+		fmt.Printf("\nerror: %v\n", err)
 		return
 	}
-	resp, err := http.Get("http://ipwhois.app/json/" + os.Args[1])
-	if err != nil {
-		fmt.Println("Error cannot get ipwhois.com.. are you connected to internet ?")
+
+	users := make(map[string]int)
+	var totalTime time.Duration
+	for _, pr := range openPrs {
+		users[pr.User.GetLogin()] += 1
+		created := pr.GetCreatedAt()
+		closed := pr.GetClosedAt()
+		diff := closed.Sub(created)
+		totalTime += diff
 	}
-	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	var whois Whois
-	json.Unmarshal(bodyBytes, &whois)
-	fmt.Println("IP: " + whois.Ip + " is located in " + whois.Country + " more precisely in " + whois.City)
+	averageTimeToClosePr := totalTime.Minutes() / float64(len(openPrs)) / 60
+	fmt.Printf("Usually a PR takes %.2f hours to close in %s\n", averageTimeToClosePr, repo)
+	fmt.Printf("User %s openned %d PR in %s\n", usertoCheck, users[usertoCheck], repo)
 }
