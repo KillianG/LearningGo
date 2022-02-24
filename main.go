@@ -44,30 +44,43 @@ func main() {
 
 	client := github.NewClient(tc)
 
-	opts := github.PullRequestListOptions{
-		State:       "closed",
-		Head:        "",
-		Base:        "",
-		Sort:        "",
-		Direction:   "",
-		ListOptions: github.ListOptions{Page: 0, PerPage: 100},
+	nbPr := 100
+	var openPrsList []*github.PullRequest
+	page := 0
+	fmt.Print("Loading")
+	for nbPr == 100 {
+		opts := github.PullRequestListOptions{
+			State:       "all",
+			Head:        "",
+			Base:        "",
+			Sort:        "",
+			Direction:   "",
+			ListOptions: github.ListOptions{Page: page, PerPage: 100},
+		}
+		page += 1
+		openPrs, _, err := client.PullRequests.List(ctx, "scality", repo, &opts)
+		openPrsList = append(openPrsList, openPrs...)
+		if err != nil {
+			fmt.Printf("\nerror: %v\n", err)
+			return
+		}
+		fmt.Print(".")
+		nbPr = len(openPrs)
 	}
-	openPrs, _, err := client.PullRequests.List(ctx, "scality", repo, &opts)
-	if err != nil {
-		fmt.Printf("\nerror: %v\n", err)
-		return
-	}
+	println()
 
 	users := make(map[string]int)
 	var totalTime time.Duration
-	for _, pr := range openPrs {
+	for _, pr := range openPrsList {
 		users[pr.User.GetLogin()] += 1
 		created := pr.GetCreatedAt()
 		closed := pr.GetClosedAt()
 		diff := closed.Sub(created)
-		totalTime += diff
+		if *pr.State == "closed" {
+			totalTime += diff
+		}
 	}
-	averageTimeToClosePr := totalTime.Minutes() / float64(len(openPrs)) / 60
+	averageTimeToClosePr := totalTime.Minutes() / float64(len(openPrsList)) / 60
 	fmt.Printf("Usually a PR takes %.2f hours to close in %s\n", averageTimeToClosePr, repo)
 	fmt.Printf("User %s openned %d PR in %s\n", usertoCheck, users[usertoCheck], repo)
 }
